@@ -55,4 +55,6 @@
     <string name="sign_up">Sign up</string>
     <string name="selecciona_un_usuario">Selecciona un usuario</string>
     <string name="escribe_un_mensaje">escribe_un_mensaje</string>
+    <string name="escribe_un_mensaje1">escribe un mensaje</string>
+    <string name="online">Online</string>
 </resources>
