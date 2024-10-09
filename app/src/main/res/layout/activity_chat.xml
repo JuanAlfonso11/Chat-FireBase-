@@ -66,8 +66,9 @@
         android:textSize="@dimen/_14ssp"
         android:textStyle="bold"
         app:layout_constraintBottom_toBottomOf="@id/imageBack"
-        app:layout_constraintStart_toEndOf="@id/imageProfile"
-    app:layout_constraintTop_toTopOf="@id/imageBack" />
+        app:layout_constraintEnd_toStartOf="@id/imageProfile"
+        app:layout_constraintStart_toEndOf="@id/imageBack"
+        app:layout_constraintTop_toTopOf="@id/imageBack" />
 
     <View
         android:id="@+id/viewSuppporter"

@@ -3,6 +3,7 @@ package com.example.fbct2.activities;
 import android.content.Intent;
 import android.os.Bundle;
 import android.view.View;
+import android.widget.Toast;
 
 import androidx.appcompat.app.AppCompatActivity;
 import androidx.recyclerview.widget.LinearLayoutManager;
@@ -88,8 +89,13 @@ public class UsersActivity extends BaseActivity implements UserListener {
     @Override
     public void onUserClicked(User user) {
         Intent intent = new Intent(getApplicationContext(), ChatActivity.class);
-        intent.putExtra(Constants.KEY_USER, user);
+        intent.putExtra(Constants.KEY_USER, user); // Pasar el objeto `User`
         startActivity(intent);
-        finish();
+    }
+
+
+    // Aquí añadimos la función showToast
+    private void showToast(String message) {
+        Toast.makeText(getApplicationContext(), message, Toast.LENGTH_SHORT).show();
     }
 }

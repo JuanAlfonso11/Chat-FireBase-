@@ -10,11 +10,12 @@ import android.view.ViewGroup;
 import androidx.annotation.NonNull;
 import androidx.recyclerview.widget.RecyclerView;
 
-import com.example.fbct2.R;
 import com.example.fbct2.databinding.ItemContainerRecentConversionBinding;
 import com.example.fbct2.listeners.ConversionListener;
 import com.example.fbct2.models.ChatMessage;
 import com.example.fbct2.models.User;
+import com.example.fbct2.utilities.Constants;
+import com.example.fbct2.utilities.PreferenceManager;
 
 import java.util.List;
 
@@ -22,12 +23,12 @@ public class RecentConversationsAdapter extends RecyclerView.Adapter<RecentConve
 
     private final List<ChatMessage> chatMessages;
     private final ConversionListener conversionListener;
-    private final Context context;
+    private final PreferenceManager preferenceManager;
 
     public RecentConversationsAdapter(List<ChatMessage> chatMessages, ConversionListener conversionListener, Context context) {
         this.chatMessages = chatMessages;
         this.conversionListener = conversionListener;
-        this.context = context;
+        this.preferenceManager = new PreferenceManager(context);  // Inicializa PreferenceManager
     }
 
     @NonNull
@@ -56,26 +57,33 @@ public class RecentConversationsAdapter extends RecyclerView.Adapter<RecentConve
         }
 
         void setData(ChatMessage chatMessage) {
-            binding.imageProfile.setImageBitmap(getConversionImage(chatMessage.conversionImage));
-            binding.textName.setText(chatMessage.conversionName);
+            Bitmap conversionImage = getConversionImage(chatMessage.conversionImage);
+            if (conversionImage != null) {
+                binding.imageProfile.setImageBitmap(conversionImage); // Establece la imagen si está disponible
+            } else {
+                binding.imageProfile.setImageResource(android.R.color.transparent); // Establece imagen transparente si no está disponible
+            }
+
+            binding.textName.setText(chatMessage.conversionName);  // Asegúrate de que se establece el nombre correctamente
             binding.textRecentMessage.setText(chatMessage.message);
+
+            // Asigna el click listener para abrir la conversación
             binding.getRoot().setOnClickListener(v -> {
                 User user = new User();
-                user.id = chatMessage.conversionId;
+                user.id = chatMessage.senderId.equals(preferenceManager.getString(Constants.KEY_USER_ID)) ? chatMessage.receiverId : chatMessage.senderId;
                 user.name = chatMessage.conversionName;
                 user.image = chatMessage.conversionImage;
-                conversionListener.onConversionClicked(user);
+                conversionListener.onConversionClicked(user);  // Asegúrate de enviar el usuario correcto
             });
         }
+
     }
 
     private Bitmap getConversionImage(String encodedImage) {
-        if (encodedImage != null) {
-            byte[] bytes = Base64.decode(encodedImage.getBytes(), Base64.DEFAULT);
-            return BitmapFactory.decodeByteArray(bytes, 0, bytes.length);
-        } else {
-            // Handle the case where encodedImage is null
-            return BitmapFactory.decodeResource(context.getResources(), R.drawable.default_profile_image); // Use a default image
+        if (encodedImage == null || encodedImage.isEmpty()) {
+            return null;
         }
+        byte[] bytes = Base64.decode(encodedImage, Base64.DEFAULT);
+        return BitmapFactory.decodeByteArray(bytes, 0, bytes.length);
     }
 }

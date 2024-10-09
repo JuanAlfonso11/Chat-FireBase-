@@ -4,13 +4,12 @@ import android.graphics.Bitmap;
 import android.graphics.BitmapFactory;
 import android.os.Bundle;
 import android.util.Base64;
+import android.util.Log;
 import android.view.View;
 import android.widget.Toast;
 
 import androidx.annotation.NonNull;
-import androidx.appcompat.app.AppCompatActivity;
 
-import com.example.fbct2.R;
 import com.example.fbct2.adapters.ChatAdapter;
 import com.example.fbct2.databinding.ActivityChatBinding;
 import com.example.fbct2.models.ChatMessage;
@@ -72,30 +71,50 @@ public class ChatActivity extends BaseActivity {
                 preferenceManager.getString(Constants.KEY_USER_ID));
         binding.chatRecyclerView.setAdapter(chatAdapter);
         database = FirebaseFirestore.getInstance();
+        checkForConversion(); // Verificar si existe una conversación ya creada
     }
 
     private void sendMessage() {
+        String messageText = binding.inputMessage.getText().toString().trim();
+
+        if (messageText.isEmpty()) {
+            showToast("No se puede enviar un mensaje vacío");
+            return;
+        }
+
         HashMap<String, Object> message = new HashMap<>();
         message.put(Constants.KEY_SENDER_ID, preferenceManager.getString(Constants.KEY_USER_ID));
         message.put(Constants.KEY_RECEIVER_ID, receiverUser.id);
-        message.put(Constants.KEY_MESSAGE, binding.inputMessage.getText().toString());
+        message.put(Constants.KEY_MESSAGE, messageText);
         message.put(Constants.KEY_TIMESTAMP, new Date());
-        database.collection(Constants.KEY_COLLECTION_CHAT).add(message);
-        if (conversionId != null) {
-            updateConversion(binding.inputMessage.getText().toString());
-        } else {
-            HashMap<String, Object> conversion = new HashMap<>();
-            conversion.put(Constants.KEY_SENDER_ID, preferenceManager.getString(Constants.KEY_USER_ID));
-            conversion.put(Constants.KEY_SENDER_NAME, preferenceManager.getString(Constants.KEY_NAME));
-            conversion.put(Constants.KEY_SENDER_IMAGE, preferenceManager.getString(Constants.KEY_IMAGE));
-            conversion.put(Constants.KEY_RECEIVER_ID, receiverUser.id);
-            conversion.put(Constants.KEY_RECEIVER_NAME, receiverUser.name);
-            conversion.put(Constants.KEY_RECEIVER_IMAGE, receiverUser.image);
-            conversion.put(Constants.KEY_LAST_MESSAGE, binding.inputMessage.getText().toString());
-            conversion.put(Constants.KEY_TIMESTAMP, new Date());
-            addConversion(conversion);
-        }
-        if(!isReceiverAvailable){
+
+        // Agregar el mensaje a la colección de chat
+        database.collection(Constants.KEY_COLLECTION_CHAT).add(message)
+                .addOnSuccessListener(documentReference -> {
+                    // Una vez que el mensaje se haya enviado correctamente, actualizamos la conversación
+                    if (conversionId != null) {
+                        // Si ya existe una conversación, actualizamos el último mensaje
+                        updateConversion(messageText);
+                    } else {
+                        // Si no existe una conversación, creamos una nueva
+                        HashMap<String, Object> conversion = new HashMap<>();
+                        conversion.put(Constants.KEY_SENDER_ID, preferenceManager.getString(Constants.KEY_USER_ID));
+                        conversion.put(Constants.KEY_SENDER_NAME, preferenceManager.getString(Constants.KEY_NAME));
+                        conversion.put(Constants.KEY_SENDER_IMAGE, preferenceManager.getString(Constants.KEY_IMAGE));
+                        conversion.put(Constants.KEY_RECEIVER_ID, receiverUser.id);
+                        conversion.put(Constants.KEY_RECEIVER_NAME, receiverUser.name);
+                        conversion.put(Constants.KEY_RECEIVER_IMAGE, receiverUser.image);
+                        conversion.put(Constants.KEY_LAST_MESSAGE, messageText);
+                        conversion.put(Constants.KEY_TIMESTAMP, new Date());
+                        addConversion(conversion);
+                    }
+
+                    // Limpia el campo de entrada del mensaje después de enviar
+                    binding.inputMessage.setText(null);
+                });
+
+        // Si el receptor no está disponible, enviamos la notificación
+        if (!isReceiverAvailable) {
             try {
                 JSONArray tokens = new JSONArray();
                 tokens.put(receiverUser.token);
@@ -103,7 +122,7 @@ public class ChatActivity extends BaseActivity {
                 data.put(Constants.KEY_USER_ID, preferenceManager.getString(Constants.KEY_USER_ID));
                 data.put(Constants.KEY_NAME, preferenceManager.getString(Constants.KEY_NAME));
                 data.put(Constants.KEY_FCM_TOKEN, preferenceManager.getString(Constants.KEY_FCM_TOKEN));
-                data.put(Constants.KEY_MESSAGE, binding.inputMessage.getText().toString());
+                data.put(Constants.KEY_MESSAGE, messageText);
 
                 JSONObject body = new JSONObject();
                 body.put(Constants.REMOTE_MSG_DATA, data);
@@ -111,11 +130,12 @@ public class ChatActivity extends BaseActivity {
 
                 sendNotification(body.toString());
 
-
-            }catch (Exception exception){}
+            } catch (Exception exception) {
+                exception.printStackTrace();
+            }
         }
-        binding.inputMessage.setText(null);
     }
+
 
     private void listenerMessages() {
         database.collection(Constants.KEY_COLLECTION_CHAT)
@@ -155,17 +175,14 @@ public class ChatActivity extends BaseActivity {
             binding.chatRecyclerView.setVisibility(View.VISIBLE);
         }
         binding.progressBar.setVisibility(View.GONE);
-        if (conversionId == null) {
-            checkForConversion();
-        }
     };
 
     private Bitmap getBitmapFormEncodedString(String encodedImage) {
-        if(encodedImage != null){
+        if (encodedImage != null && !encodedImage.isEmpty()) {
             byte[] bytes = Base64.decode(encodedImage, Base64.DEFAULT);
             return BitmapFactory.decodeByteArray(bytes, 0, bytes.length);
-        }else{
-            return null;
+        } else {
+            return null; // Manejar casos donde no haya imagen
         }
     }
 
@@ -173,53 +190,70 @@ public class ChatActivity extends BaseActivity {
     private void loadReceiverDetails() {
         receiverUser = (User) getIntent().getSerializableExtra(Constants.KEY_USER);
         if (receiverUser != null) {
+            Log.d("ChatActivity", "Receiver details loaded: " + receiverUser.name);
             binding.textName.setText(receiverUser.name);
-            Bitmap receiverImage = getBitmapFormEncodedString(receiverUser.image);
-            if (receiverImage != null) {
-                binding.imageProfile.setImageBitmap(receiverImage);
+            Bitmap bitmap = getBitmapFormEncodedString(receiverUser.image);
+            if (bitmap != null) {
+                binding.imageProfile.setImageBitmap(bitmap);
             } else {
-                binding.imageProfile.setImageResource(R.drawable.default_profile_image);
+                binding.imageProfile.setImageResource(android.R.color.transparent);
             }
+        } else {
+            Log.e("ChatActivity", "Receiver is null");
+            showToast("No se pudo cargar la información del receptor.");
         }
     }
+
+
+
 
     private void setListeners() {
         binding.imageBack.setOnClickListener(v -> onBackPressed());
         binding.layoutSend.setOnClickListener(v -> sendMessage());
     }
 
+    private void updateConversion(String message){
+        if (conversionId != null) {
+            DocumentReference documentReference =
+                    database.collection(Constants.KEY_COLLECTION_CONVERSATIONS).document(conversionId);
+            documentReference.update(
+                    Constants.KEY_LAST_MESSAGE, message,
+                    Constants.KEY_TIMESTAMP, new Date()
+            );
+        }
+    }
+
+
     private String getReadableDateTime(Date date) {
         return new SimpleDateFormat("MMMM dd, yyyy - hh:mm a", Locale.getDefault()).format(date);
     }
 
-    private void addConversion(HashMap<String, Object> conversion) {
+    private void addConversion(HashMap<String, Object> conversion){
         database.collection(Constants.KEY_COLLECTION_CONVERSATIONS)
                 .add(conversion)
-                .addOnSuccessListener(documentReference -> conversionId = documentReference.getId());
+                .addOnSuccessListener(documentReference -> conversionId = documentReference.getId())
+                .addOnFailureListener(e -> showToast("Error al agregar conversacion"));
     }
 
-    private void checkForConversion() {
-        if (chatMessages.size() != 0) {
+
+    // Verificar si ya existe una conversación entre el usuario actual y el receptor
+    private void checkForConversion(){
+        if(chatMessages.size() != 0){
             checkForConversationRemotely(preferenceManager.getString(Constants.KEY_USER_ID), receiverUser.id);
             checkForConversationRemotely(receiverUser.id, preferenceManager.getString(Constants.KEY_USER_ID));
         }
     }
 
-    private void updateConversion(String message) {
-        DocumentReference documentReference = database.collection(Constants.KEY_COLLECTION_CONVERSATIONS).document(conversionId);
-        documentReference.update(Constants.KEY_LAST_MESSAGE, message, Constants.KEY_TIMESTAMP, new Date());
-    }
-
-    private void checkForConversationRemotely(String senderId, String receiverId) {
+    private void checkForConversationRemotely(String senderId, String receiverId){
         database.collection(Constants.KEY_COLLECTION_CONVERSATIONS)
                 .whereEqualTo(Constants.KEY_SENDER_ID, senderId)
                 .whereEqualTo(Constants.KEY_RECEIVER_ID, receiverId)
                 .get()
-                .addOnCompleteListener(conversionListener);
+                .addOnCompleteListener(conversionOnCompleteListener);
     }
 
-    private final OnCompleteListener<QuerySnapshot> conversionListener = task -> {
-        if (task.isSuccessful() && task.getResult() != null && task.getResult().getDocuments().size() > 0) {
+    private final OnCompleteListener<QuerySnapshot> conversionOnCompleteListener = task -> {
+        if(task.isSuccessful() && task.getResult() != null && task.getResult().getDocuments().size() > 0){
             DocumentSnapshot documentSnapshot = task.getResult().getDocuments().get(0);
             conversionId = documentSnapshot.getId();
         }
@@ -228,75 +262,79 @@ public class ChatActivity extends BaseActivity {
     @Override
     protected void onResume() {
         super.onResume();
-        listenAvailabilityOfReceiver();
+        if (receiverUser != null && receiverUser.id != null) {
+            listenAvailabilityOfReceiver();
+        } else {
+            showToast("No se pudo cargar la información del receptor.");
+        }
     }
 
-    @Override
-    public void onBackPressed() {
-        super.onBackPressed();
-    }
-    private void showToast(String message) {
-        Toast.makeText(this, message, Toast.LENGTH_SHORT).show();
-    }
-    private void sendNotification(String messageBody) {
-        ApiClient.getClient().create(ApiService.class).sendMessage(
-                Constants.getRemoteMsgHeaders(),messageBody)
-                .enqueue(new Callback<String>() {
-                    @Override
-                    public void onResponse(@NonNull Call<String> call,@NonNull Response<String> response) {
-                        if (response.isSuccessful()) {
-                            try{
-                                if(response.body() != null){
-                                    JSONObject responseJson = new JSONObject(response.body());
-                                    JSONArray results = responseJson.getJSONArray("results");
-                                    if(responseJson.getInt("failure") == 1){
-                                        JSONObject error = (JSONObject) results.get(0);
-                                        showToast(error.getString("error"));
-                                        return;
-                                    }
-                                }
-                            }catch (JSONException e){
-                                e.printStackTrace();
-                            }
-                            showToast("Notificación enviada");
-                        } else {
-                            showToast("Error" + response.code());
-                        }
-
-                    }
-
-                    @Override
-                    public void onFailure(@NonNull Call<String> call,@NonNull Throwable t) {
-                        showToast(t.getMessage());
-
-                    }
-                });
-    }
     private void listenAvailabilityOfReceiver() {
-        database.collection(Constants.KEY_COLLECTION_USERS).document(receiverUser.id)
-                .addSnapshotListener(ChatActivity.this, (value, error) -> {
-                    if (error != null) {
-                        return;
-                    }
-                    if (value != null) {
-                        if (value.getLong(Constants.KEY_AVAILABILITY) != null) {
-                            int availability = Objects.requireNonNull(value.getLong(Constants.KEY_AVAILABILITY)).intValue();
-                            isReceiverAvailable = availability == 1;
+        if (receiverUser != null && receiverUser.id != null) {
+            database.collection(Constants.KEY_COLLECTION_USERS)
+                    .document(receiverUser.id)
+                    .addSnapshotListener(ChatActivity.this, (value, error) -> {
+                        if (error != null) {
+                            return;
                         }
-                        receiverUser.token = value.getString(Constants.KEY_FCM_TOKEN);
-                        if(receiverUser.token == null){
-                            receiverUser.image = value.getString(Constants.KEY_IMAGE);
-                            chatAdapter.setReceiverProfileImage(getBitmapFormEncodedString(receiverUser.image));
-                            chatAdapter.notifyItemRangeChanged(0, chatMessages.size());
+                        if (value != null) {
+                            if (value.getLong(Constants.KEY_AVAILABILITY) != null) {
+                                int availability = Objects.requireNonNull(value.getLong(Constants.KEY_AVAILABILITY)).intValue();
+                                isReceiverAvailable = availability == 1;
+                            }
+                            receiverUser.token = value.getString(Constants.KEY_FCM_TOKEN);
+                            if (receiverUser.token == null) {
+                                receiverUser.image = value.getString(Constants.KEY_IMAGE);
+                                if (receiverUser.image != null) {
+                                    chatAdapter.setReceiverProfileImage(getBitmapFormEncodedString(receiverUser.image));
+                                    chatAdapter.notifyItemRangeChanged(0, chatMessages.size());
+                                }
+                            }
                         }
-                    }
                         if (isReceiverAvailable) {
                             binding.textAvailability.setVisibility(View.VISIBLE);
                         } else {
                             binding.textAvailability.setVisibility(View.GONE);
                         }
-
-                });
+                    });
         }
+    }
 
+    private void showToast(String message) {
+        Toast.makeText(this, message, Toast.LENGTH_SHORT).show();
+    }
+
+
+    private void sendNotification(String messageBody) {
+        ApiClient.getClient().create(ApiService.class).sendMessage(
+                        Constants.getRemoteMsgHeaders(), messageBody)
+                .enqueue(new Callback<String>() {
+                    @Override
+                    public void onResponse(@NonNull Call<String> call, @NonNull Response<String> response) {
+                        if (response.isSuccessful()) {
+                            try {
+                                if (response.body() != null) {
+                                    JSONObject responseJson = new JSONObject(response.body());
+                                    JSONArray results = responseJson.getJSONArray("results");
+                                    if (responseJson.getInt("failure") == 1) {
+                                        JSONObject error = (JSONObject) results.get(0);
+                                        showToast(error.getString("error"));
+                                        return;
+                                    }
+                                }
+                            } catch (JSONException e) {
+                                e.printStackTrace();
+                            }
+                            showToast("Notificación enviada");
+                        } else {
+                            showToast("Error " + response.code());
+                        }
+                    }
+
+                    @Override
+                    public void onFailure(@NonNull Call<String> call, @NonNull Throwable t) {
+                        showToast(t.getMessage());
+                    }
+                });
+    }
 }
