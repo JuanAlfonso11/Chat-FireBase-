@@ -87,42 +87,57 @@ public class MainActivity extends BaseActivity implements ConversionListener {
                 .whereEqualTo(Constants.KEY_RECEIVER_ID, preferenceManager.getString(Constants.KEY_USER_ID))
                 .addSnapshotListener(eventListener);
     }
+//funciona
+private final EventListener<QuerySnapshot> eventListener = (value, error) -> {
+    if (error != null) {
+        return;
+    }
+    if (value != null) {
+        for (DocumentChange documentChange : value.getDocumentChanges()) {
+            if (documentChange.getType() == DocumentChange.Type.ADDED || documentChange.getType() == DocumentChange.Type.MODIFIED) {
+                ChatMessage chatMessage = new ChatMessage();
+                String senderId = documentChange.getDocument().getString(Constants.KEY_SENDER_ID);
+                String receiverId = documentChange.getDocument().getString(Constants.KEY_RECEIVER_ID);
 
-    private final EventListener<QuerySnapshot> eventListener = (value, error) -> {
-        if (error != null) {
-            return;
-        }
-        if (value != null) {
-            for (DocumentChange documentChange : value.getDocumentChanges()) {
-                if (documentChange.getType() == DocumentChange.Type.ADDED) {
-                    ChatMessage chatMessage = new ChatMessage();
-                    String senderId = documentChange.getDocument().getString(Constants.KEY_SENDER_ID);
-                    String receiverId = documentChange.getDocument().getString(Constants.KEY_RECEIVER_ID);
+                chatMessage.senderId = senderId;
+                chatMessage.receiverId = receiverId;
+                chatMessage.message = documentChange.getDocument().getString(Constants.KEY_LAST_MESSAGE);
+                chatMessage.dateObject = documentChange.getDocument().getDate(Constants.KEY_TIMESTAMP);
+                chatMessage.conversionId = documentChange.getDocument().getId();
 
-                    chatMessage.senderId = senderId;
-                    chatMessage.receiverId = receiverId;
-                    chatMessage.message = documentChange.getDocument().getString(Constants.KEY_LAST_MESSAGE);
-                    chatMessage.dateObject = documentChange.getDocument().getDate(Constants.KEY_TIMESTAMP);
-                    chatMessage.conversionId = documentChange.getDocument().getId();
+                if (senderId.equals(preferenceManager.getString(Constants.KEY_USER_ID))) {
+                    chatMessage.conversionName = documentChange.getDocument().getString(Constants.KEY_RECEIVER_NAME);
+                    chatMessage.conversionImage = documentChange.getDocument().getString(Constants.KEY_RECEIVER_IMAGE);
+                } else {
+                    chatMessage.conversionName = documentChange.getDocument().getString(Constants.KEY_SENDER_NAME);
+                    chatMessage.conversionImage = documentChange.getDocument().getString(Constants.KEY_SENDER_IMAGE);
+                }
 
-                    if (senderId.equals(preferenceManager.getString(Constants.KEY_USER_ID))) {
-                        chatMessage.conversionName = documentChange.getDocument().getString(Constants.KEY_RECEIVER_NAME);
-                        chatMessage.conversionImage = documentChange.getDocument().getString(Constants.KEY_RECEIVER_IMAGE);
-                    } else {
-                        chatMessage.conversionName = documentChange.getDocument().getString(Constants.KEY_SENDER_NAME);
-                        chatMessage.conversionImage = documentChange.getDocument().getString(Constants.KEY_SENDER_IMAGE);
+                // Verifica si ya existe una conversación con el mismo usuario
+                boolean isConversationExist = false;
+                for (ChatMessage conversation : conversations) {
+                    if (conversation.senderId.equals(chatMessage.senderId) && conversation.receiverId.equals(chatMessage.receiverId)) {
+                        // Actualiza la conversación existente
+                        conversation.message = chatMessage.message;
+                        conversation.dateObject = chatMessage.dateObject;
+                        isConversationExist = true;
+                        break;
                     }
+                }
 
+                // Solo agrega la conversación si no existe
+                if (!isConversationExist) {
                     conversations.add(chatMessage);
                 }
             }
-            Collections.sort(conversations, (obj1, obj2) -> obj2.dateObject.compareTo(obj1.dateObject));
-            conversationsAdapter.notifyDataSetChanged();  // Notifica al adaptador que los datos han cambiado
-            binding.conversationRecyclerView.smoothScrollToPosition(0);  // Asegúrate de que la lista se desplaza al nuevo mensaje
-            binding.conversationRecyclerView.setVisibility(View.VISIBLE);  // Muestra el RecyclerView
-            binding.progressBar.setVisibility(View.GONE);  // Oculta la barra de progreso
         }
-    };
+        Collections.sort(conversations, (obj1, obj2) -> obj2.dateObject.compareTo(obj1.dateObject));
+        conversationsAdapter.notifyDataSetChanged();
+        binding.conversationRecyclerView.smoothScrollToPosition(0);
+        binding.conversationRecyclerView.setVisibility(View.VISIBLE);
+        binding.progressBar.setVisibility(View.GONE);
+    }
+};
 
 
 

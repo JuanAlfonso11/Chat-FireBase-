@@ -37,7 +37,6 @@ import java.util.Date;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Locale;
-import java.util.Objects;
 
 import retrofit2.Call;
 import retrofit2.Callback;
@@ -88,51 +87,53 @@ public class ChatActivity extends BaseActivity {
         message.put(Constants.KEY_MESSAGE, messageText);
         message.put(Constants.KEY_TIMESTAMP, new Date());
 
-        // Agregar el mensaje a la colección de chat
+        // Enviar mensaje a la base de datos
         database.collection(Constants.KEY_COLLECTION_CHAT).add(message)
                 .addOnSuccessListener(documentReference -> {
-                    // Una vez que el mensaje se haya enviado correctamente, actualizamos la conversación
                     if (conversionId != null) {
-                        // Si ya existe una conversación, actualizamos el último mensaje
+                        // Si ya existe una conversación, la actualizamos
                         updateConversion(messageText);
                     } else {
-                        // Si no existe una conversación, creamos una nueva
-                        HashMap<String, Object> conversion = new HashMap<>();
-                        conversion.put(Constants.KEY_SENDER_ID, preferenceManager.getString(Constants.KEY_USER_ID));
-                        conversion.put(Constants.KEY_SENDER_NAME, preferenceManager.getString(Constants.KEY_NAME));
-                        conversion.put(Constants.KEY_SENDER_IMAGE, preferenceManager.getString(Constants.KEY_IMAGE));
-                        conversion.put(Constants.KEY_RECEIVER_ID, receiverUser.id);
-                        conversion.put(Constants.KEY_RECEIVER_NAME, receiverUser.name);
-                        conversion.put(Constants.KEY_RECEIVER_IMAGE, receiverUser.image);
-                        conversion.put(Constants.KEY_LAST_MESSAGE, messageText);
-                        conversion.put(Constants.KEY_TIMESTAMP, new Date());
-                        addConversion(conversion);
+                        // Verifica si ya existe una conversación antes de crear una nueva
+                        checkForExistingConversationAndCreate(messageText);
                     }
-
-                    // Limpia el campo de entrada del mensaje después de enviar
                     binding.inputMessage.setText(null);
                 });
 
-        // Si el receptor no está disponible, enviamos la notificación
         if (!isReceiverAvailable) {
-            try {
-                JSONArray tokens = new JSONArray();
-                tokens.put(receiverUser.token);
-                JSONObject data = new JSONObject();
-                data.put(Constants.KEY_USER_ID, preferenceManager.getString(Constants.KEY_USER_ID));
-                data.put(Constants.KEY_NAME, preferenceManager.getString(Constants.KEY_NAME));
-                data.put(Constants.KEY_FCM_TOKEN, preferenceManager.getString(Constants.KEY_FCM_TOKEN));
-                data.put(Constants.KEY_MESSAGE, messageText);
+            sendNotification(messageText);
+        }
+    }
 
-                JSONObject body = new JSONObject();
-                body.put(Constants.REMOTE_MSG_DATA, data);
-                body.put(Constants.REMOTE_MSG_REGISTRATION_IDS, tokens);
 
-                sendNotification(body.toString());
+    private void checkForConversionAndCreate(String messageText) {
+        checkForConversationRemotely(preferenceManager.getString(Constants.KEY_USER_ID), receiverUser.id);
+        checkForConversationRemotely(receiverUser.id, preferenceManager.getString(Constants.KEY_USER_ID));
 
-            } catch (Exception exception) {
-                exception.printStackTrace();
-            }
+        if (conversionId == null) {
+            HashMap<String, Object> conversion = new HashMap<>();
+            conversion.put(Constants.KEY_SENDER_ID, preferenceManager.getString(Constants.KEY_USER_ID));
+            conversion.put(Constants.KEY_SENDER_NAME, preferenceManager.getString(Constants.KEY_NAME));
+            conversion.put(Constants.KEY_SENDER_IMAGE, preferenceManager.getString(Constants.KEY_IMAGE));
+            conversion.put(Constants.KEY_RECEIVER_ID, receiverUser.id);
+            conversion.put(Constants.KEY_RECEIVER_NAME, receiverUser.name);
+            conversion.put(Constants.KEY_RECEIVER_IMAGE, receiverUser.image);
+            conversion.put(Constants.KEY_LAST_MESSAGE, messageText);
+            conversion.put(Constants.KEY_TIMESTAMP, new Date());
+            addConversion(conversion);
+        }
+    }
+
+    private void addConversion(HashMap<String, Object> conversion) {
+        database.collection(Constants.KEY_COLLECTION_CONVERSATIONS)
+                .add(conversion)
+                .addOnSuccessListener(documentReference -> conversionId = documentReference.getId());
+    }
+
+    private void updateConversion(String message) {
+        if (conversionId != null) {
+            DocumentReference documentReference = database.collection(Constants.KEY_COLLECTION_CONVERSATIONS).document(conversionId);
+            documentReference.update(Constants.KEY_LAST_MESSAGE, message, Constants.KEY_TIMESTAMP, new Date());
         }
     }
 
@@ -186,7 +187,6 @@ public class ChatActivity extends BaseActivity {
         }
     }
 
-
     private void loadReceiverDetails() {
         receiverUser = (User) getIntent().getSerializableExtra(Constants.KEY_USER);
         if (receiverUser != null) {
@@ -204,47 +204,67 @@ public class ChatActivity extends BaseActivity {
         }
     }
 
-
-
-
     private void setListeners() {
         binding.imageBack.setOnClickListener(v -> onBackPressed());
         binding.layoutSend.setOnClickListener(v -> sendMessage());
     }
 
-    private void updateConversion(String message){
-        if (conversionId != null) {
-            DocumentReference documentReference =
-                    database.collection(Constants.KEY_COLLECTION_CONVERSATIONS).document(conversionId);
-            documentReference.update(
-                    Constants.KEY_LAST_MESSAGE, message,
-                    Constants.KEY_TIMESTAMP, new Date()
-            );
-        }
-    }
-
-
     private String getReadableDateTime(Date date) {
         return new SimpleDateFormat("MMMM dd, yyyy - hh:mm a", Locale.getDefault()).format(date);
     }
 
-    private void addConversion(HashMap<String, Object> conversion){
-        database.collection(Constants.KEY_COLLECTION_CONVERSATIONS)
-                .add(conversion)
-                .addOnSuccessListener(documentReference -> conversionId = documentReference.getId())
-                .addOnFailureListener(e -> showToast("Error al agregar conversacion"));
-    }
-
-
-    // Verificar si ya existe una conversación entre el usuario actual y el receptor
-    private void checkForConversion(){
-        if(chatMessages.size() != 0){
+    private void checkForConversion() {
+        if(chatMessages.size() != 0) {
             checkForConversationRemotely(preferenceManager.getString(Constants.KEY_USER_ID), receiverUser.id);
             checkForConversationRemotely(receiverUser.id, preferenceManager.getString(Constants.KEY_USER_ID));
         }
     }
+    private void checkForExistingConversationAndCreate(String messageText) {
+        // Verificar si ya existe una conversación en ambas direcciones (A->B y B->A)
+        database.collection(Constants.KEY_COLLECTION_CONVERSATIONS)
+                .whereEqualTo(Constants.KEY_SENDER_ID, preferenceManager.getString(Constants.KEY_USER_ID))
+                .whereEqualTo(Constants.KEY_RECEIVER_ID, receiverUser.id)
+                .get()
+                .addOnCompleteListener(task -> {
+                    if (task.isSuccessful() && task.getResult() != null && task.getResult().size() > 0) {
+                        conversionId = task.getResult().getDocuments().get(0).getId();
+                        updateConversion(messageText);
+                    } else {
+                        // Verificar en la otra dirección
+                        database.collection(Constants.KEY_COLLECTION_CONVERSATIONS)
+                                .whereEqualTo(Constants.KEY_SENDER_ID, receiverUser.id)
+                                .whereEqualTo(Constants.KEY_RECEIVER_ID, preferenceManager.getString(Constants.KEY_USER_ID))
+                                .get()
+                                .addOnCompleteListener(task2 -> {
+                                    if (task2.isSuccessful() && task2.getResult() != null && task2.getResult().size() > 0) {
+                                        conversionId = task2.getResult().getDocuments().get(0).getId();
+                                        updateConversion(messageText);
+                                    } else {
+                                        // Si no existe conversación en ambas direcciones, creamos una nueva
+                                        createNewConversation(messageText);
+                                    }
+                                });
+                    }
+                });
+    }
+    private void createNewConversation(String messageText) {
+        HashMap<String, Object> conversion = new HashMap<>();
+        conversion.put(Constants.KEY_SENDER_ID, preferenceManager.getString(Constants.KEY_USER_ID));
+        conversion.put(Constants.KEY_SENDER_NAME, preferenceManager.getString(Constants.KEY_NAME));
+        conversion.put(Constants.KEY_SENDER_IMAGE, preferenceManager.getString(Constants.KEY_IMAGE));
+        conversion.put(Constants.KEY_RECEIVER_ID, receiverUser.id);
+        conversion.put(Constants.KEY_RECEIVER_NAME, receiverUser.name);
+        conversion.put(Constants.KEY_RECEIVER_IMAGE, receiverUser.image);
+        conversion.put(Constants.KEY_LAST_MESSAGE, messageText);
+        conversion.put(Constants.KEY_TIMESTAMP, new Date());
 
-    private void checkForConversationRemotely(String senderId, String receiverId){
+        database.collection(Constants.KEY_COLLECTION_CONVERSATIONS)
+                .add(conversion)
+                .addOnSuccessListener(documentReference -> conversionId = documentReference.getId());
+    }
+
+
+    private void checkForConversationRemotely(String senderId, String receiverId) {
         database.collection(Constants.KEY_COLLECTION_CONVERSATIONS)
                 .whereEqualTo(Constants.KEY_SENDER_ID, senderId)
                 .whereEqualTo(Constants.KEY_RECEIVER_ID, receiverId)
@@ -253,7 +273,7 @@ public class ChatActivity extends BaseActivity {
     }
 
     private final OnCompleteListener<QuerySnapshot> conversionOnCompleteListener = task -> {
-        if(task.isSuccessful() && task.getResult() != null && task.getResult().getDocuments().size() > 0){
+        if (task.isSuccessful() && task.getResult() != null && task.getResult().getDocuments().size() > 0) {
             DocumentSnapshot documentSnapshot = task.getResult().getDocuments().get(0);
             conversionId = documentSnapshot.getId();
         }
@@ -279,7 +299,7 @@ public class ChatActivity extends BaseActivity {
                         }
                         if (value != null) {
                             if (value.getLong(Constants.KEY_AVAILABILITY) != null) {
-                                int availability = Objects.requireNonNull(value.getLong(Constants.KEY_AVAILABILITY)).intValue();
+                                int availability = value.getLong(Constants.KEY_AVAILABILITY).intValue();
                                 isReceiverAvailable = availability == 1;
                             }
                             receiverUser.token = value.getString(Constants.KEY_FCM_TOKEN);
@@ -304,7 +324,6 @@ public class ChatActivity extends BaseActivity {
         Toast.makeText(this, message, Toast.LENGTH_SHORT).show();
     }
 
-
     private void sendNotification(String messageBody) {
         ApiClient.getClient().create(ApiService.class).sendMessage(
                         Constants.getRemoteMsgHeaders(), messageBody)
@@ -317,7 +336,7 @@ public class ChatActivity extends BaseActivity {
                                     JSONObject responseJson = new JSONObject(response.body());
                                     JSONArray results = responseJson.getJSONArray("results");
                                     if (responseJson.getInt("failure") == 1) {
-                                        JSONObject error = (JSONObject) results.get(0);
+                                        JSONObject error = results.getJSONObject(0);
                                         showToast(error.getString("error"));
                                         return;
                                     }
